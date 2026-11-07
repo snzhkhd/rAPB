@@ -6,120 +6,138 @@
 #include "UdpListener.h"
 #include "WS_DS_COM.h"
 
+#include <mutex>
+#include <cstring>
+
+static const unsigned short DistrictUdpPort = 6969;
+
 Configuration* cfg;
-vector<Account*>* accounts;
-vector<thread*>* threads;
 Network* world;
-WS2DS* packet;
-bool ProcessWorldPacket(WS2DS* packet);
-bool ContainsAccount(int id);
-void Thread(Account* acc);
+vector<Account*> accounts;
+mutex accountsLock;
+
+bool ProcessWorldMessage();
+void UdpThread();
 
 int main()
 {
 	Log_Clear();
 	cfg = new Configuration("Configs\\District.conf");
-	char* token = new char[8];
-	strcpy(token, GetTokenFromFile("Configs\\token.id"));
-	accounts = new vector<Account*>();
-	threads = new vector<thread*>();
+	string token = GetTokenFromFile("Configs\\token.id");
 	world = new Network();
-	if (world->Setup(cfg->GetWorldIP(), atoi(cfg->GetWorldPort())) == OK)
+	if (world->Setup(cfg->GetWorldIP(), atoi(cfg->GetWorldPort())) != OK)
 	{
-		Logger(lINFO, "Network::Setup()", "Ready to connect to World Server");
-		if (world->Connect() == OK)
+		Logger(lERROR, "Network::Setup()", "Socket setup failed");
+		return 1;
+	}
+	Logger(lINFO, "Network::Setup()", "Ready to connect to World Server");
+	if (world->Connect() != OK)
+	{
+		Logger(lERROR, "Network::Connect()", "Connection failed");
+		return 1;
+	}
+	Logger(lSUCCESS, "Network::Connect()", "Connected to World Server");
+
+	char port[8];
+	sprintf_s(port, sizeof(port), "%d", DistrictUdpPort);
+	if (world->SendInitial(cfg->GetDistrictType(), cfg->GetDistrictID(), cfg->GetDistrictLanguage(), GetPublicIP(), port, (char*)token.c_str()) != OK)
+	{
+		Logger(lERROR, "Network::Send()", "Data sending failed");
+		return 1;
+	}
+	Logger(lINFO, "Network::Send()", "Initial data sent");
+
+	// The first answer must be a successful registration, otherwise there is nothing to serve.
+	char header[2];
+	if (!world->ReceiveExact(header, 2) || header[0] != WS2DS::ResponseToInitial)
+	{
+		Logger(lERROR, "main()", "No registration answer from World Server");
+		return 1;
+	}
+	switch (header[1])
+	{
+		case WS2DS::RegisterSuccess:
+			Logger(lSUCCESS, "main()", "Registered at World Server");
+			break;
+		case WS2DS::NotAllowed:
+			Logger(lERROR, "main()", "Not allowed to host a district (check token.id and CanHostDistrict)");
+			return 1;
+		case WS2DS::DistrictAlreadyExists1:
+		case WS2DS::DistrictAlreadyExists2:
+			Logger(lERROR, "main()", "District already exists");
+			return 1;
+		case WS2DS::IDis0:
+			Logger(lERROR, "main()", "District ID can not be 0");
+			return 1;
+		default:
+			Logger(lERROR, "main()", "Unknown registration answer '%c'", header[1]);
+			return 1;
+	}
+
+	// One UDP socket serves every player in this district; packets are told apart by sender address.
+	thread udp(UdpThread);
+	udp.detach();
+
+	while (ProcessWorldMessage()) {}
+	Logger(lERROR, "main()", "Lost connection to World Server, exiting in 5 seconds...");
+	Sleep(5000);
+	return 1;
+}
+
+bool ProcessWorldMessage()
+{
+	char header;
+	if (!world->ReceiveExact(&header, 1)) return false;
+
+	if (header != WS2DS::AccountEntersDistrict)
+	{
+		Logger(lERROR, "ProcessWorldMessage()", "Unknown message from World Server: 0x%02X", (unsigned char)header);
+		return false;
+	}
+
+	unsigned char body[WS2DS::AccountEnterBody];
+	if (!world->ReceiveExact((char*)body, sizeof(body))) return false;
+
+	unsigned int accountId = body[0] | (body[1] << 8) | (body[2] << 16) | ((unsigned int)body[3] << 24);
+	Account* acc = new Account(accountId, body + 4, body + 4 + Account::KeySize);
+
+	lock_guard<mutex> guard(accountsLock);
+	for (size_t i = 0; i < accounts.size(); i++)
+	{
+		if (accounts[i]->GetId() == accountId)
 		{
-			Logger(lSUCCESS, "Network::Connect()", "Connected to World Server");
-			if(world->SendInitial(cfg->GetDistrictType(), cfg->GetDistrictID(), cfg->GetDistrictLanguage(), GetPublicIP(), "6969", token) == OK)
-			{
-				Logger(lINFO, "Network::Send()", "Initial data sent");
-				packet = new WS2DS(world->Receive(2));
-				if(ProcessWorldPacket(packet))
-				{
-					bool loop = true;
-					while (loop)
-					{
-						packet = new WS2DS(world->Receive(2));
-						loop = ProcessWorldPacket(packet);
-					}
-					Logger(lERROR, "main()", "Exiting in 5 seconds...");
-					Sleep(5000);
-					exit(1);
-				}
-				else Logger(lERROR, "ProcessPacket()", "Initial packet failed to process");
-			}
-			else Logger(lERROR, "Network::Send()", "Data sending failed");
+			// The player re-entered: keep only the newest keys.
+			delete accounts[i];
+			accounts.erase(accounts.begin() + i);
+			break;
 		}
-		else Logger(lERROR, "Network::Connect()", "Connection failed");
 	}
-	else Logger(lERROR, "Network::Setup()", "Socket setup failed");
-    return 0;
+	accounts.push_back(acc);
+
+	const unsigned char* k = acc->GetEncryptionKey();
+	Logger(lINFO, "ProcessWorldMessage()", "District enter from account ID: %u (key: %02X%02X%02X%02X...)", accountId, k[0], k[1], k[2], k[3]);
+	return true;
 }
 
-bool ProcessWorldPacket(WS2DS* packet)
+void UdpThread()
 {
-	if (packet->ReadHeader() == WS2DS::ResponseToInitial)
+	UdpListener listener(DistrictUdpPort);
+	if (!listener.IsValid()) return;
+	Logger(lINFO, "UdpThread()", "Listening for clients on UDP port %d", DistrictUdpPort);
+
+	char data[2048];
+	sockaddr_in from;
+	while (true)
 	{
-		Logger(lINFO, "ProcessWorldPacket()", "Received response for initial packet");
-		switch (packet->ReadChar())
+		int len = listener.Receive(data, sizeof(data), &from);
+		if (len < 0)
 		{
-			case WS2DS::NotAllowed:
-				Logger(lERROR, "ProcessWorldPacket()", "Not allowed to host a district");
-				return false;
-
-			case WS2DS::DistrictAlreadyExists1:
-			case WS2DS::DistrictAlreadyExists2:
-				Logger(lERROR, "ProcessWorldPacket()", "District already exists");
-				return false;
-
-			case WS2DS::RegisterSuccess:
-				Logger(lSUCCESS, "ProcessWorldPacket()", "Registered at World Server");
-				return true;
-
-			case WS2DS::IDis0:
-				Logger(lERROR, "ProcessWorldPacket()", "ID can not be 0");
-				return false;
-				
-			default:
-				return false;
+			Logger(lERROR, "UdpThread()", "recvfrom failed: %d", WSAGetLastError());
+			continue;
 		}
-	}
-	else if (packet->ReadHeader() == WS2DS::AccountEntersDistrict)
-	{
-		int accountId = (int)packet->ReadChar();
-		char* encryptionKey = world->Receive(16);
-		Account* acc = new Account(accountId, encryptionKey);
-		if (ContainsAccount(acc->GetId())) return true;
-		Logger(lINFO, "ProcessPacket()", "District enter from account ID: %d (key: %s)", acc->GetId(), acc->GetEncryptionKey());
-		accounts->push_back(acc);
-		thread *t = new thread(Thread, acc);
-		threads->push_back(t);
-		threads->back()->join();
-		return true;
-	}
-	else return false;
-}
-
-bool ContainsAccount(int id)
-{
-	for (std::vector<Account*>::iterator it = accounts->begin(); it != accounts->end(); ++it) 
-	{
-		Account* acc = *it;
-		if (acc->GetId() == id) return true;
-	}
-	return false;
-}
-
-void Thread(Account* acc)
-{
-	UdpListener* listener = new UdpListener();
-	while (1)
-	{
-		char t[30];
-		sprintf_s(t, sizeof(t), "Thread(%d)", acc->GetId());
-		char data[2048];
-		strcpy(data, listener->Receive());
-		int len = strlen(data);
-		if (len > 0) Logger(lINFO, t, "Received data, size = %d", len);
+		// TODO: handshake, XXTEA decryption and the Unreal net protocol.
+		Logger(lINFO, "UdpThread()", "Received %d bytes from %d.%d.%d.%d:%d", len,
+			from.sin_addr.S_un.S_un_b.s_b1, from.sin_addr.S_un.S_un_b.s_b2,
+			from.sin_addr.S_un.S_un_b.s_b3, from.sin_addr.S_un.S_un_b.s_b4, ntohs(from.sin_port));
 	}
 }

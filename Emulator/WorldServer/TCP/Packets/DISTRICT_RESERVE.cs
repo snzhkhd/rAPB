@@ -1,4 +1,5 @@
-﻿using FrameWork.NetWork;
+﻿using FrameWork.Logger;
+using FrameWork.NetWork;
 using System.Collections.Generic;
 
 namespace WorldServer.TCP.Packets
@@ -9,55 +10,63 @@ namespace WorldServer.TCP.Packets
         public int HandlePacket(BaseClient client, PacketIn packet)
         {
             WorldClient cclient = (WorldClient)client;
+            // Districts are keyed as (type << 24) + id, the same value the client sends here.
             uint code = packet.GetUint32();
-            PacketOut Out = new PacketOut((uint)Opcodes.ANS_DISTRICT_RESERVE);
-            uint soc = 16777216;
-            uint fin = 2 * soc;
-            uint wat = fin * 10 + soc;
+            byte requestedType = (byte)(code >> 24);
+            cclient.Reserved = null;
+
+            Districts.District found = null;
+            bool sawFull = false;
             lock (Program.districtsListener.Districts)
             {
-                foreach (KeyValuePair<uint, Districts.District> district in Program.districtsListener.Districts)
+                // Prefer the exact district the client picked...
+                Districts.District exact;
+                if (Program.districtsListener.Districts.TryGetValue(code, out exact))
                 {
-                    if (code - soc < 100) if (district.Value.Type == (byte)Districts.DistrictTypes.SOCIAL) cclient.Reserved = new Districts.SocialDistrict(district.Value.Id); ;
-                    if (code - fin < 100) if (district.Value.Type == (byte)Districts.DistrictTypes.FINANCIAL) cclient.Reserved = new Districts.FinancialDistrict(district.Value.Id);
-                    if (code - wat < 100) if (district.Value.Type == (byte)Districts.DistrictTypes.WATERFRONT) cclient.Reserved = new Districts.WaterFrontDistrict(district.Value.Id);
+                    if (exact.isFull() == 0) found = exact;
+                    else sawFull = true;
+                }
 
-                    if (cclient.Reserved != null)
+                // ...otherwise any district of the same type that still has room.
+                if (found == null)
+                {
+                    foreach (KeyValuePair<uint, Districts.District> district in Program.districtsListener.Districts)
                     {
-                        if (district.Value.isFull() == 0)
+                        if (district.Value.Type != requestedType) continue;
+                        if (district.Value.isFull() != 0)
                         {
-                            cclient.Reserved.Key = district.Key;
-                            cclient.Reserved.Id = district.Value.Id;
-                            cclient.Reserved.IP = district.Value.IP;
-                            cclient.Reserved.Port = district.Value.Port;
-                            cclient.Reserved.Criminals = district.Value.Criminals;
-                            cclient.Reserved.Enforcers = district.Value.Enforcers;
-                            cclient.Reserved.Queue = district.Value.Queue;
-                            cclient.Reserved.tcp = district.Value.tcp;
-                            Out.WriteUInt32((uint)ResponseCodes.RC_SUCCESS);
-                            Out.WriteUInt32(cclient.Reserved.Key);
-                            Out.WriteByte(cclient.Character.GroupStatus);
-                            Out.WriteByte(0);
-                            DISTRICT_ENTER.Send(cclient);
+                            sawFull = true;
+                            continue;
                         }
-                        else
-                        {
-                            Out.WriteUInt32Reverse((uint)ResponseCodes.RC_DISTRICT_RESERVE_FULL);
-                            Out.WriteUInt32(0);
-                            Out.WriteByte(0);
-                            Out.WriteByte(0);
-                        }
-                    }
-                    else
-                    {
-                        Out.WriteUInt32Reverse((uint)ResponseCodes.RC_DISTRICT_RESERVE_INVALID_DISTRICT);
-                        Out.WriteUInt32(0);
-                        Out.WriteByte(0);
-                        Out.WriteByte(0);
+                        found = district.Value;
+                        break;
                     }
                 }
             }
+
+            PacketOut Out = new PacketOut((uint)Opcodes.ANS_DISTRICT_RESERVE);
+            if (found != null)
+            {
+                cclient.Reserved = found;
+                Log.Info("DistrictReserve", "Account " + cclient.Account.Index + " reserved " + found + " (requested 0x" + code.ToString("X8") + ")");
+                Out.WriteUInt32Reverse((uint)ResponseCodes.RC_SUCCESS);
+                Out.WriteUInt32(found.Key);
+                Out.WriteByte(cclient.Character.GroupStatus);
+                Out.WriteByte(0);
+            }
+            else
+            {
+                ResponseCodes rc = sawFull ? ResponseCodes.RC_DISTRICT_RESERVE_FULL : ResponseCodes.RC_DISTRICT_RESERVE_INVALID_DISTRICT;
+                Log.Error("DistrictReserve", "Account " + cclient.Account.Index + " could not reserve 0x" + code.ToString("X8") + ": " + rc);
+                Out.WriteUInt32Reverse((uint)rc);
+                Out.WriteUInt32(0);
+                Out.WriteByte(0);
+                Out.WriteByte(0);
+            }
             cclient.Send(Out);
+
+            // The reservation answer goes out first, then the district address and keys.
+            if (found != null) DISTRICT_ENTER.Send(cclient);
             return 0;
         }
     }

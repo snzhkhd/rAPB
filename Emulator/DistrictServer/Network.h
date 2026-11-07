@@ -21,5 +21,5 @@ public:
 	int Shutdown();
 	int Send(char* buffer);
 	int SendInitial(int districtType, int districtId, int language, char* address, char* port, char* token);
-	char* Receive(int size);
+	bool ReceiveExact(char* buffer, int size);
 };

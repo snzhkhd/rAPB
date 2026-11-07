@@ -58,6 +58,7 @@ namespace WorldServer.Districts
                             return;
                         }
                     }
+                    district.Key = code;
                     Program.districtsListener.Districts.Add(code, district);
                     Program.districtsListener.DistrictsTcp.Add(district.tcp, code);
                 }

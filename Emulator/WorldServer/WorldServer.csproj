@@ -60,9 +60,6 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\APB SERVER\FrameWork.dll</HintPath>
     </Reference>
-    <Reference Include="MyDB">
-      <HintPath>..\APB SERVER\MyDB.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core">
       <RequiredTargetFramework>3.5</RequiredTargetFramework>
@@ -111,6 +108,12 @@
     <Compile Include="TCP\Packets\DISTRICT_LIST.cs" />
     <Compile Include="TCP\WorldClient.cs" />
     <Compile Include="TCP\TcpServer.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MyDB\MyDB.csproj">
+      <Project>{3ED4FC14-179C-4778-B92D-14D17DAD7BE2}</Project>
+      <Name>MyDB</Name>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include="Microsoft.Net.Client.3.5">

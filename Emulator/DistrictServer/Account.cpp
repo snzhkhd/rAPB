@@ -1,30 +1,27 @@
 #include "stdafx.h"
 #include "Account.h"
 
-Account::Account(int id, char* encryptionKey)
+#include <cstring>
+
+Account::Account(unsigned int id, const unsigned char* encryptionKey, const unsigned char* handshakeHash)
 {
 	this->id = id;
-	this->encryptionKey = new char[16];
-	strcpy(this->encryptionKey, encryptionKey);
+	// Keys and hashes are binary data that may contain zero bytes, so copy them by size.
+	memcpy(this->encryptionKey, encryptionKey, KeySize);
+	memcpy(this->handshakeHash, handshakeHash, HandshakeHashSize);
 }
 
-void Account::SetId(int id)
+unsigned int Account::GetId() const
 {
-	this->id = id;
+	return id;
 }
 
-int Account::GetId()
+const unsigned char* Account::GetEncryptionKey() const
 {
-	return this->id;
+	return encryptionKey;
 }
 
-void Account::SetEncryptionKey(char* encryptionKey)
+const unsigned char* Account::GetHandshakeHash() const
 {
-	this->encryptionKey = new char[16];
-	strcpy(this->encryptionKey, encryptionKey);
-}
-
-char* Account::GetEncryptionKey()
-{
-	return this->encryptionKey;
+	return handshakeHash;
 }

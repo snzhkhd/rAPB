@@ -9,6 +9,7 @@ using namespace std;
 #include <iostream>
 #include <fstream>
 #include <thread>
+#include <string>
 
 #define lINFO 0
 #define lWARN 1
@@ -27,6 +28,6 @@ using namespace std;
 
 void Logger(unsigned int lvl, char* caller, char* logline, ...);
 void Log_Clear();
-char* GetTokenFromFile(char* file);
+string GetTokenFromFile(char* file);
 char* GetPublicIP();
 long btea(long* v, long n, long* k);

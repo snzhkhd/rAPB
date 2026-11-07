@@ -6,8 +6,11 @@ Configuration::Configuration(char* file)
 	ifstream in(file);
 	char str[255];
 	int line = 0;
+	// Room for "255.255.255.255" / "65535" plus the terminating zero.
 	ip = new char[16];
-	port = new char[4];
+	port = new char[6];
+	ip[0] = '\0';
+	port[0] = '\0';
 	districtId = 0;
 	districtType = 0;
 	language = 0;
@@ -23,8 +26,8 @@ Configuration::Configuration(char* file)
 		in.getline(str, 255);
 		if (in)
 		{
-			if (line == 0) strcpy(ip, str);
-			else if (line == 1) strcpy(port, str);
+			if (line == 0) strncpy_s(ip, 16, str, _TRUNCATE);
+			else if (line == 1) strncpy_s(port, 6, str, _TRUNCATE);
 			else if (line == 2)
 			{
 				//TODO: support for other districts when their IDs are found

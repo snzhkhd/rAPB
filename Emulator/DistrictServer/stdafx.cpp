@@ -46,20 +46,19 @@ void Logger(unsigned int lvl, char* caller, char* logline, ...)
 	fclose(file);
 }
 
-char* GetTokenFromFile(char* file)
+string GetTokenFromFile(char* file)
 {
 	ifstream in(file);
-	char str[255];
+	string token;
 
 	if (!in)
 	{
-		cout << "Cannot open config file.\n";
+		cout << "Cannot open token file.\n";
 		return "";
 	}
 
-	in.getline(str, 255);
-	in.close();
-	return str;
+	getline(in, token);
+	return token;
 }
 
 char* GetPublicIP()

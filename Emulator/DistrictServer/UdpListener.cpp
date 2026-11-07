@@ -1,24 +1,43 @@
 #include "stdafx.h"
 #include "UdpListener.h"
 
-UdpListener::UdpListener()
+#include <cstring>
+
+UdpListener::UdpListener(unsigned short port)
 {
-	port = 6969;
-	broadcast = new char[2048];
-	slen = sizeof(sockaddr);
-	assert((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) != -1);
-	setsockopt(s, SOL_SOCKET, SO_BROADCAST, broadcast, 2048);
+	s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (s == INVALID_SOCKET)
+	{
+		Logger(lERROR, "UdpListener", "socket() failed: %d", WSAGetLastError());
+		return;
+	}
+
 	memset(&si_me, 0, sizeof(si_me));
 	si_me.sin_family = AF_INET;
 	si_me.sin_port = htons(port);
 	si_me.sin_addr.s_addr = INADDR_ANY;
-	assert(::bind(s, (sockaddr*)&si_me, sizeof(sockaddr)) != -1);
+	if (::bind(s, (sockaddr*)&si_me, sizeof(si_me)) == SOCKET_ERROR)
+	{
+		Logger(lERROR, "UdpListener", "bind() on UDP port %d failed: %d", port, WSAGetLastError());
+		closesocket(s);
+		s = INVALID_SOCKET;
+	}
 }
 
-char* UdpListener::Receive()
+UdpListener::~UdpListener()
 {
-	char data[2048];
-	int received = recvfrom(s, data, sizeof(data) - 1, 0, (sockaddr *)&si_other, &slen);
-	data[received] = '\0';
-	return data;
+	if (s != INVALID_SOCKET) closesocket(s);
+}
+
+bool UdpListener::IsValid() const
+{
+	return s != INVALID_SOCKET;
+}
+
+int UdpListener::Receive(char* buffer, int bufferSize, sockaddr_in* from)
+{
+	int fromLen = sizeof(sockaddr_in);
+	int received = recvfrom(s, buffer, bufferSize, 0, (sockaddr*)from, &fromLen);
+	if (received == SOCKET_ERROR) return -1;
+	return received;
 }

@@ -1,35 +1,15 @@
 #pragma once
 
-#include "stdafx.h"
-
-class WS2DS
+// Messages the world server sends to a district server over TCP.
+namespace WS2DS
 {
-public:
-	WS2DS(char* data)
+	enum Headers
 	{
-		this->data = new char[strlen(data)];
-		strcpy(this->data, data);
-		pos = 1;
-	}
-
-	char ReadHeader()
-	{
-		return data[0];
-	}
-
-	char ReadChar()
-	{
-		if (pos + 1 <= strlen(data)) return data[pos++];
-		else return '\0';
-	}
-
-	static enum Headers
-	{
-		ResponseToInitial = '0',
-		AccountEntersDistrict = '1'
+		ResponseToInitial = '0',     // followed by one InitialResponseCodes byte
+		AccountEntersDistrict = '1'  // followed by AccountEnterBody bytes
 	};
 
-	static enum InitialResponseCodes
+	enum InitialResponseCodes
 	{
 		NotAllowed = '0',
 		DistrictAlreadyExists1 = '1',
@@ -38,7 +18,6 @@ public:
 		IDis0 = '4'
 	};
 
-private:
-	char* data;
-	int pos;
-};
+	// uint32 account id (little-endian) + 16-byte XXTEA key + 20-byte handshake hash
+	const int AccountEnterBody = 4 + 16 + 20;
+}

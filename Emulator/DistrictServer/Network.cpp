@@ -61,12 +61,24 @@ int Network::SendInitial(int districtType, int districtId, int language, char* a
 	return Send(data);
 }
 
-char* Network::Receive(int size)
+bool Network::ReceiveExact(char* buffer, int size)
 {
-	char* buffer = new char[size];
-	int  result = recv(sock, buffer, size, 0);
-	if (result > 0) buffer[result] = '\0';
-	else if (result == 0) Logger(lERROR, "Network::Receive()", "Connection closed");
-	else Logger(lERROR, "Network::Receive()", "Receiving failed! Error code: %d", WSAGetLastError());
-	return buffer;
+	// TCP is a stream: one recv() may return only part of a message, so keep reading until it is complete.
+	int received = 0;
+	while (received < size)
+	{
+		int result = recv(sock, buffer + received, size - received, 0);
+		if (result == 0)
+		{
+			Logger(lERROR, "Network::ReceiveExact()", "Connection closed");
+			return false;
+		}
+		if (result == SOCKET_ERROR)
+		{
+			Logger(lERROR, "Network::ReceiveExact()", "Receiving failed! Error code: %d", WSAGetLastError());
+			return false;
+		}
+		received += result;
+	}
+	return true;
 }
